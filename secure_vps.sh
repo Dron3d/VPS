@@ -53,11 +53,21 @@ bantime = 1h
 findtime = 10m
 EOF
 
-# 5. Настройка Firewall (UFW) - ПОЛНЫЙ СПИСОК ДЛЯ XRAY/XHTTP
-echo "--- Настройка правил UFW (TCP/UDP) ---"
+# 5. Настройка Firewall (UFW) - ПОЛНЫЙ ФИКС ДЛЯ XRAY/XHTTP/WS
+echo "--- Настройка правил UFW (Очистка IPv6 и фикс WS/TLS) ---"
+
+# Отключаем IPv6 внутри UFW
+sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
+
+# Сброс и базовые политики
 sudo ufw --force reset
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
+sudo ufw default allow routed # Критично для прокси/VLESS
+
+# Разрешаем Loopback (внутренний трафик системы)
+sudo ufw allow in on lo
+sudo ufw allow out on lo
 
 # Твой кастомный SSH
 sudo ufw allow $NEW_SSH_PORT/tcp comment 'SSH Custom Port'
@@ -74,29 +84,25 @@ sudo ufw allow 8443/udp
 sudo ufw allow 10443/tcp
 sudo ufw allow 10443/udp
 
-# Порты для Amnezia и доп. сервисов (из твоего списка)
+# Порты для Amnezia и доп. сервисов
 for p in 80 585; do
     sudo ufw allow $p/tcp
     sudo ufw allow $p/udp
 done
 
-# UDP порт для AmneziaWG (если используешь)
+# UDP порт для AmneziaWG
 sudo ufw allow 2408/udp comment 'AmneziaWG'
 
-# Принудительная активация
+# Принудительная активация UFW в конфиге
 sudo sed -i 's/ENABLED=no/ENABLED=yes/' /etc/ufw/ufw.conf
-echo "y" | sudo ufw enable
 
 # 6. Проверка конфига и перезапуск
 echo "--- Проверка конфигурации SSH ---"
-
-# ФИКС: Создаем директорию вручную, чтобы sshd -t не выдавал ошибку на чистой системе
 sudo mkdir -p /run/sshd
 sudo chmod 755 /run/sshd
 
 if ! sudo /usr/sbin/sshd -t; then
     echo -e "${RED}ОШИБКА КОНФИГА SSH! ПРЕРЫВАЮ.${NC}"
-    # Выводим конкретную ошибку из системы для диагностики
     sudo /usr/sbin/sshd -t
     exit 1
 fi
@@ -110,13 +116,14 @@ sudo systemctl enable ssh.service
 sudo systemctl unmask ufw.service
 sudo systemctl enable ufw.service
 
-# Очистка порта перед запуском (убиваем старые процессы sshd)
+# Очистка порта перед запуском
 sudo fuser -k $NEW_SSH_PORT/tcp 2>/dev/null
 
 # Финальный запуск
 sudo systemctl restart ssh
 sudo systemctl restart fail2ban
 echo "y" | sudo ufw enable
+sudo ufw reload
 
 # -------------------------------------------------------
 # БЛОК ПРОВЕРОК
@@ -134,17 +141,20 @@ else
     sudo systemctl status ssh --no-pager
 fi
 
-# Проверка автозагрузки (UFW и SSH)
+# Проверка автозагрузки
 UFW_BOOT=$(systemctl is-enabled ufw)
 SSH_BOOT=$(systemctl is-enabled ssh)
 echo -e "Автозапуск Firewall: ${GREEN}$UFW_BOOT${NC}"
 echo -e "Автозапуск SSH: ${GREEN}$SSH_BOOT${NC}"
 
+# Проверка IPv6 в UFW
+UFW_IPV6=$(grep "IPV6=" /etc/default/ufw)
+echo -e "UFW IPv6 Config: ${YELLOW}$UFW_IPV6${NC}"
+
 # Статус UFW
-echo -e "\n${YELLOW}Активные правила UFW:${NC}"
+echo -e "\n${YELLOW}Активные правила UFW (IPv4 only):${NC}"
 sudo ufw status verbose
 
 echo -e "${GREEN}-------------------------------------------------------${NC}"
 echo -e "ГОТОВО! SSH на порту: ${RED}$NEW_SSH_PORT${NC}"
-echo -e "Лог сохранен: $LOG${NC}"
 echo -e "Для входа: ssh -p $NEW_SSH_PORT root@$(curl -s https://ifconfig.me)${NC}"
