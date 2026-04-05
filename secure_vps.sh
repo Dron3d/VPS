@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Настройки - выбери порт, который НЕ занят xray (например, 2222)
+# Настройки
 NEW_SSH_PORT=2222
 
 # Цвета для вывода
@@ -14,7 +14,7 @@ echo -e "${GREEN}>>> Начинаю настройку безопасности 
 sudo apt update && sudo apt install -y fail2ban ufw
 
 # 2. РЕШЕНИЕ ПРОБЛЕМЫ UBUNTU 24.04 (ssh.socket)
-# Отключаем сокет, который мешает смене порта
+# В новых Ubuntu сокет перехватывает порт 22. Его нужно полностью нейтрализовать.
 echo "--- Отключение ssh.socket (фикс для Ubuntu 24.04) ---"
 sudo systemctl stop ssh.socket
 sudo systemctl disable ssh.socket
@@ -22,10 +22,13 @@ sudo systemctl mask ssh.socket
 
 # 3. Настройка SSH
 echo "--- Смена порта SSH на $NEW_SSH_PORT ---"
-sudo sed -i "s/^#Port 22/Port $NEW_SSH_PORT/" /etc/ssh/sshd_config
-sudo sed -i "s/^Port 22/Port $NEW_SSH_PORT/" /etc/ssh/sshd_config
-# Убираем старые привязки к 10443, если они были
-sudo sed -i "s/^Port 10443/Port $NEW_SSH_PORT/" /etc/ssh/sshd_config
+# Делаем бэкап на всякий случай
+sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+
+# Удаляем любые строки Port, чтобы не было дублей, и пишем одну чистую
+sudo sed -i '/^Port /d' /etc/ssh/sshd_config
+sudo sed -i '/^#Port /d' /etc/ssh/sshd_config
+echo "Port $NEW_SSH_PORT" | sudo tee -a /etc/ssh/sshd_config
 
 # 4. Настройка Fail2Ban
 echo "--- Настройка Fail2Ban ---"
@@ -35,8 +38,8 @@ enabled = true
 port    = $NEW_SSH_PORT
 maxretry = 5
 bantime = 1h
+findtime = 10m
 EOF
-sudo systemctl restart fail2ban
 
 # 5. Настройка Firewall (UFW)
 echo "--- Настройка UFW ---"
@@ -44,27 +47,27 @@ sudo ufw --force reset
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
-# Разрешаем новый SSH
+# Разрешаем новый SSH порт
 sudo ufw allow $NEW_SSH_PORT/tcp comment 'SSH Custom'
 
-# Разрешаем порты для XRAY (TCP/UDP)
-sudo ufw allow 80/tcp
-sudo ufw allow 443
-sudo ufw allow 8443
-sudo ufw allow 10443
-sudo ufw allow 585/tcp
-sudo ufw allow 2408/udp
+# Разрешаем порты для XRAY и Amnezia (TCP/UDP)
+for port in 80/tcp 443 8443 10443 585/tcp 2408/udp; do
+    sudo ufw allow $port
+done
 
-# Автозапуск UFW
+# Автозапуск UFW при старте системы
 sudo systemctl enable ufw
 sudo sed -i 's/ENABLED=no/ENABLED=yes/' /etc/ufw/ufw.conf
 echo "y" | sudo ufw enable
 
-# 6. Финальный перезапуск SSH
+# 6. Финальный перезапуск всех служб
+echo "--- Перезапуск демонов ---"
+sudo systemctl daemon-reload
 sudo systemctl restart ssh
+sudo systemctl restart fail2ban
 
 echo -e "${GREEN}-------------------------------------------------------${NC}"
 echo -e "ГОТОВО! Теперь SSH работает на порту: ${RED}$NEW_SSH_PORT${NC}"
-echo -e "Порт 10443 ОСТАВЛЕН для работы XRAY."
+echo -e "Проверь статус: ${GREEN}sudo ss -tulpn | grep ssh${NC}"
 echo -e "${GREEN}-------------------------------------------------------${NC}"
-echo -e "Заходи командой: ssh -p $NEW_SSH_PORT root@твой_ip"
+echo -e "Заходи: ssh -p $NEW_SSH_PORT root@ваш_ip"
