@@ -53,20 +53,39 @@ bantime = 1h
 findtime = 10m
 EOF
 
-# 5. Настройка Firewall (UFW)
-echo "--- Настройка правил UFW ---"
+# 5. Настройка Firewall (UFW) - ПОЛНЫЙ СПИСОК ДЛЯ XRAY/XHTTP
+echo "--- Настройка правил UFW (TCP/UDP) ---"
 sudo ufw --force reset
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
+
+# Твой кастомный SSH
 sudo ufw allow $NEW_SSH_PORT/tcp comment 'SSH Custom Port'
 
-# Разрешаем порты для XRAY и Amnezia
-for p in 80/tcp 443 8443 10443 585 2408/udp; do
-    sudo ufw allow $p
+# 443 порт: REALITY (XHTTP, VISION)
+sudo ufw allow 443/tcp
+sudo ufw allow 443/udp
+
+# 8443 порт: TLS (RAW, XHTTP, WS, GRPC)
+sudo ufw allow 8443/tcp
+sudo ufw allow 8443/udp
+
+# 10443 порт: SOCKS5 Прокси
+sudo ufw allow 10443/tcp
+sudo ufw allow 10443/udp
+
+# Порты для Amnezia и доп. сервисов (из твоего списка)
+for p in 80 585; do
+    sudo ufw allow $p/tcp
+    sudo ufw allow $p/udp
 done
 
-# Принудительная активация UFW в конфиге
+# UDP порт для AmneziaWG (если используешь)
+sudo ufw allow 2408/udp comment 'AmneziaWG'
+
+# Принудительная активация
 sudo sed -i 's/ENABLED=no/ENABLED=yes/' /etc/ufw/ufw.conf
+echo "y" | sudo ufw enable
 
 # 6. Проверка конфига и перезапуск
 echo "--- Проверка конфигурации SSH ---"
