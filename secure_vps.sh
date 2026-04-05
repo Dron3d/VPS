@@ -6,6 +6,7 @@ NEW_SSH_PORT=2222
 # Цвета для вывода
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}>>> Начинаю настройку безопасности (совместимость с autoXRAY и Amnezia)...${NC}"
@@ -25,6 +26,7 @@ sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 # Удаляем ВСЕ упоминания Port
 sudo sed -i '/^[#]*Port /d' /etc/ssh/sshd_config
 # Создаем drop-in конфиг и добавляем порт в основной файл
+sudo mkdir -p /etc/ssh/sshd_config.d/
 echo "Port $NEW_SSH_PORT" | sudo tee /etc/ssh/sshd_config.d/port.conf
 echo "Port $NEW_SSH_PORT" | sudo tee -a /etc/ssh/sshd_config
 
@@ -65,8 +67,25 @@ sudo systemctl daemon-reload
 sudo systemctl restart ssh
 sudo systemctl restart fail2ban
 
+echo -e "\n${GREEN}-------------------------------------------------------${NC}"
+echo -e "${GREEN}ПРОВЕРКА СТАТУСА СИСТЕМЫ:${NC}"
+
+# Проверка порта SSH в реальности
+REAL_PORT=$(sudo ss -tulpn | grep sshd | awk '{print $5}' | sed 's/.*://' | head -n 1)
+if [ "$REAL_PORT" == "$NEW_SSH_PORT" ]; then
+    echo -e "SSH Порт: ${GREEN}$REAL_PORT (OK)${NC}"
+else
+    echo -e "SSH Порт: ${RED}$REAL_PORT (ОШИБКА, ожидалось $NEW_SSH_PORT)${NC}"
+fi
+
+# Проверка автозапуска UFW
+UFW_BOOT=$(systemctl is-enabled ufw)
+echo -e "Автозапуск Firewall: ${GREEN}$UFW_BOOT${NC}"
+
+# Вывод правил фаервола
+echo -e "\n${YELLOW}Активные правила UFW:${NC}"
+sudo ufw status verbose
+
 echo -e "${GREEN}-------------------------------------------------------${NC}"
 echo -e "ГОТОВО! SSH на порту: ${RED}$NEW_SSH_PORT${NC}"
-echo -e "Порт 585 открыт для TCP и UDP (Amnezia).${NC}"
-echo -e "-------------------------------------------------------${NC}"
-echo -e "Команда входа: ${RED}ssh -p $NEW_SSH_PORT root@ваш_ip${NC}"
+echo -e "Команда входа: ${RED}ssh -p $NEW_SSH_PORT root@ваша_ip${NC}"
