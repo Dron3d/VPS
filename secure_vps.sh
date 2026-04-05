@@ -20,13 +20,11 @@ sudo apt update && sudo apt install -y fail2ban ufw psmisc curl
 
 # 2. РЕШЕНИЕ ПРОБЛЕМЫ UBUNTU 24.04 (ssh.socket)
 echo "--- Полное отключение ssh.socket (фикс для Ubuntu 24.04) ---"
-# Мы не просто стопаем, мы полностью маскируем сокет, чтобы он не перехватывал порт 22
 sudo systemctl stop ssh.socket 2>/dev/null
 sudo systemctl disable ssh.socket 2>/dev/null
 sudo systemctl mask ssh.socket 2>/dev/null
 
 # 2.1 Системный override (решает Missing privilege separation directory)
-# Без этого SSH не запустится после ребута на Ubuntu 24.04
 sudo mkdir -p /etc/systemd/system/ssh.service.d/
 cat <<EOF | sudo tee /etc/systemd/system/ssh.service.d/override.conf
 [Service]
@@ -36,7 +34,7 @@ ExecStart=
 ExecStart=/usr/sbin/sshd -D -p $NEW_SSH_PORT
 EOF
 
-# 3. Настройка SSH (Твоя логика: drop-in + основной конфиг)
+# 3. Настройка SSH (drop-in + основной конфиг)
 echo "--- Настройка порта SSH на $NEW_SSH_PORT ---"
 sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 sudo sed -i '/^[#]*Port /d' /etc/ssh/sshd_config
@@ -67,12 +65,20 @@ for p in 80/tcp 443 8443 10443 585 2408/udp; do
     sudo ufw allow $p
 done
 
-# Принудительная активация UFW в конфиге (чтобы ENABLED=yes)
+# Принудительная активация UFW в конфиге
 sudo sed -i 's/ENABLED=no/ENABLED=yes/' /etc/ufw/ufw.conf
 
 # 6. Проверка конфига и перезапуск
+echo "--- Проверка конфигурации SSH ---"
+
+# ФИКС: Создаем директорию вручную, чтобы sshd -t не выдавал ошибку на чистой системе
+sudo mkdir -p /run/sshd
+sudo chmod 755 /run/sshd
+
 if ! sudo /usr/sbin/sshd -t; then
     echo -e "${RED}ОШИБКА КОНФИГА SSH! ПРЕРЫВАЮ.${NC}"
+    # Выводим конкретную ошибку из системы для диагностики
+    sudo /usr/sbin/sshd -t
     exit 1
 fi
 
