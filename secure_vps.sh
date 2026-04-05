@@ -8,13 +8,12 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}>>> Начинаю настройку безопасности (совместимость с autoXRAY)...${NC}"
+echo -e "${GREEN}>>> Начинаю настройку безопасности (совместимость с autoXRAY и Amnezia)...${NC}"
 
 # 1. Установка пакетов
 sudo apt update && sudo apt install -y fail2ban ufw
 
 # 2. РЕШЕНИЕ ПРОБЛЕМЫ UBUNTU 24.04 (ssh.socket)
-# В новых Ubuntu сокет перехватывает порты. Его нужно полностью нейтрализовать.
 echo "--- Отключение ssh.socket (фикс для Ubuntu 24.04) ---"
 sudo systemctl stop ssh.socket
 sudo systemctl disable ssh.socket
@@ -22,12 +21,10 @@ sudo systemctl mask ssh.socket
 
 # 3. Настройка SSH
 echo "--- Смена порта SSH на $NEW_SSH_PORT ---"
-# Делаем бэкап
 sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-
-# Удаляем ВСЕ строки начинающиеся на Port или #Port
+# Удаляем ВСЕ упоминания Port
 sudo sed -i '/^[#]*Port /d' /etc/ssh/sshd_config
-# Добавляем наш порт в начало файла
+# Создаем drop-in конфиг и добавляем порт в основной файл
 echo "Port $NEW_SSH_PORT" | sudo tee /etc/ssh/sshd_config.d/port.conf
 echo "Port $NEW_SSH_PORT" | sudo tee -a /etc/ssh/sshd_config
 
@@ -44,7 +41,6 @@ EOF
 
 # 5. Настройка Firewall (UFW)
 echo "--- Настройка UFW ---"
-# Сбрасываем старые правила
 sudo ufw --force reset
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
@@ -52,9 +48,9 @@ sudo ufw default allow outgoing
 # Разрешаем новый SSH порт
 sudo ufw allow $NEW_SSH_PORT/tcp comment 'SSH Custom Port'
 
-# Разрешаем порты для XRAY и Amnezia (TCP/UDP)
-# 80/tcp для сертификатов, остальные для трафика
-for p in 80/tcp 443 8443 10443 585/tcp 2408/udp; do
+# Разрешаем порты для XRAY и Amnezia
+# 585 открываем без /tcp, чтобы работал и UDP (туннель AmneziaWG), и TCP (управление)
+for p in 80/tcp 443 8443 10443 585 2408/udp; do
     sudo ufw allow $p
 done
 
@@ -70,8 +66,7 @@ sudo systemctl restart ssh
 sudo systemctl restart fail2ban
 
 echo -e "${GREEN}-------------------------------------------------------${NC}"
-echo -e "ГОТОВО! SSH теперь должен слушать порт: ${RED}$NEW_SSH_PORT${NC}"
-echo -e "Проверка порта: ${GREEN}sudo ss -tulpn | grep ssh${NC}"
-echo -e "Проверка UFW: ${GREEN}sudo ufw status${NC}"
+echo -e "ГОТОВО! SSH на порту: ${RED}$NEW_SSH_PORT${NC}"
+echo -e "Порт 585 открыт для TCP и UDP (Amnezia).${NC}"
 echo -e "-------------------------------------------------------${NC}"
 echo -e "Команда входа: ${RED}ssh -p $NEW_SSH_PORT root@ваш_ip${NC}"
