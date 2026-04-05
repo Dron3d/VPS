@@ -34,17 +34,15 @@ ExecStart=
 ExecStart=/usr/sbin/sshd -D -p $NEW_SSH_PORT
 EOF
 
-# 3. Настройка SSH (Твоя логика с портами)
+# 3. Настройка SSH
 echo "--- Настройка порта SSH ---"
 sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-# Удаляем ВСЕ упоминания Port
 sudo sed -i '/^[#]*Port /d' /etc/ssh/sshd_config
-# Создаем drop-in и пишем в основной файл
 sudo mkdir -p /etc/ssh/sshd_config.d/
 echo "Port $NEW_SSH_PORT" | sudo tee /etc/ssh/sshd_config.d/port.conf
 echo "Port $NEW_SSH_PORT" | sudo tee -a /etc/ssh/sshd_config
 
-# 4. Настройка Fail2Ban (Твои настройки)
+# 4. Настройка Fail2Ban
 echo "--- Настройка Fail2Ban ---"
 cat <<EOF | sudo tee /etc/fail2ban/jail.local
 [sshd]
@@ -78,8 +76,12 @@ fi
 
 echo "--- Применение настроек и активация служб ---"
 sudo systemctl daemon-reload
+
+# АКТИВАЦИЯ АВТОЗАГРУЗКИ (SSH и UFW)
 sudo systemctl unmask ssh.service
 sudo systemctl enable ssh.service
+sudo systemctl unmask ufw.service
+sudo systemctl enable ufw.service
 
 # Очистка порта перед запуском
 sudo fuser -k $NEW_SSH_PORT/tcp 2>/dev/null
@@ -90,7 +92,7 @@ sudo systemctl restart fail2ban
 echo "y" | sudo ufw enable
 
 # -------------------------------------------------------
-# БЛОК ПРОВЕРОК (Твой оригинальный формат)
+# БЛОК ПРОВЕРОК
 # -------------------------------------------------------
 echo -e "\n${GREEN}-------------------------------------------------------${NC}"
 echo -e "${GREEN}ПРОВЕРКА СТАТУСА СИСТЕМЫ:${NC}"
@@ -100,10 +102,10 @@ REAL_PORT=$(sudo ss -tulpn | grep sshd | awk '{print $5}' | sed 's/.*://' | head
 if [ "$REAL_PORT" == "$NEW_SSH_PORT" ]; then
     echo -e "SSH Порт: ${GREEN}$REAL_PORT (OK)${NC}"
 else
-    echo -e "SSH Порт: ${RED}$REAL_PORT (ОШИБКА, ожидалось $NEW_SSH_PORT)${NC}"
+    echo -e "SSH Порт: ${RED}$REAL_PORT (ОШИБКА)${NC}"
 fi
 
-# Автозапуск UFW
+# Автозапуск UFW (Проверка того, что мы добавили)
 UFW_BOOT=$(systemctl is-enabled ufw)
 echo -e "Автозапуск Firewall: ${GREEN}$UFW_BOOT${NC}"
 
