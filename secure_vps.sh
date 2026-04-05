@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Настройки
-NEW_SSH_PORT=10443
+NEW_SSH_PORT=2222
 
 # Цвета для вывода
 GREEN='\033[0;32m'
