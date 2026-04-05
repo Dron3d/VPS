@@ -19,12 +19,14 @@ echo -e "${GREEN}>>> ЗАПУСК ПОЛНОЙ НАСТРОЙКИ (Ubuntu 24.04 
 sudo apt update && sudo apt install -y fail2ban ufw psmisc curl
 
 # 2. РЕШЕНИЕ ПРОБЛЕМЫ UBUNTU 24.04 (ssh.socket)
-echo "--- Отключение ssh.socket (фикс для Ubuntu 24.04) ---"
+echo "--- Полное отключение ssh.socket (фикс для Ubuntu 24.04) ---"
+# Мы не просто стопаем, мы полностью маскируем сокет, чтобы он не перехватывал порт 22
 sudo systemctl stop ssh.socket 2>/dev/null
 sudo systemctl disable ssh.socket 2>/dev/null
 sudo systemctl mask ssh.socket 2>/dev/null
 
 # 2.1 Системный override (решает Missing privilege separation directory)
+# Без этого SSH не запустится после ребута на Ubuntu 24.04
 sudo mkdir -p /etc/systemd/system/ssh.service.d/
 cat <<EOF | sudo tee /etc/systemd/system/ssh.service.d/override.conf
 [Service]
@@ -34,8 +36,8 @@ ExecStart=
 ExecStart=/usr/sbin/sshd -D -p $NEW_SSH_PORT
 EOF
 
-# 3. Настройка SSH
-echo "--- Настройка порта SSH ---"
+# 3. Настройка SSH (Твоя логика: drop-in + основной конфиг)
+echo "--- Настройка порта SSH на $NEW_SSH_PORT ---"
 sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 sudo sed -i '/^[#]*Port /d' /etc/ssh/sshd_config
 sudo mkdir -p /etc/ssh/sshd_config.d/
@@ -65,7 +67,7 @@ for p in 80/tcp 443 8443 10443 585 2408/udp; do
     sudo ufw allow $p
 done
 
-# Принудительная активация UFW в конфиге
+# Принудительная активация UFW в конфиге (чтобы ENABLED=yes)
 sudo sed -i 's/ENABLED=no/ENABLED=yes/' /etc/ufw/ufw.conf
 
 # 6. Проверка конфига и перезапуск
@@ -74,19 +76,19 @@ if ! sudo /usr/sbin/sshd -t; then
     exit 1
 fi
 
-echo "--- Применение настроек и активация служб ---"
+echo "--- Применение настроек и активация АВТОЗАГРУЗКИ ---"
 sudo systemctl daemon-reload
 
-# АКТИВАЦИЯ АВТОЗАГРУЗКИ (SSH и UFW)
+# Включаем автозапуск служб
 sudo systemctl unmask ssh.service
 sudo systemctl enable ssh.service
 sudo systemctl unmask ufw.service
 sudo systemctl enable ufw.service
 
-# Очистка порта перед запуском
+# Очистка порта перед запуском (убиваем старые процессы sshd)
 sudo fuser -k $NEW_SSH_PORT/tcp 2>/dev/null
 
-# Перезапуск
+# Финальный запуск
 sudo systemctl restart ssh
 sudo systemctl restart fail2ban
 echo "y" | sudo ufw enable
@@ -97,17 +99,21 @@ echo "y" | sudo ufw enable
 echo -e "\n${GREEN}-------------------------------------------------------${NC}"
 echo -e "${GREEN}ПРОВЕРКА СТАТУСА СИСТЕМЫ:${NC}"
 
-# Реальный порт
+# Реальный порт через ss
+sleep 1
 REAL_PORT=$(sudo ss -tulpn | grep sshd | awk '{print $5}' | sed 's/.*://' | head -n 1)
 if [ "$REAL_PORT" == "$NEW_SSH_PORT" ]; then
     echo -e "SSH Порт: ${GREEN}$REAL_PORT (OK)${NC}"
 else
-    echo -e "SSH Порт: ${RED}$REAL_PORT (ОШИБКА)${NC}"
+    echo -e "SSH Порт: ${RED}$REAL_PORT (ОШИБКА, ожидалось $NEW_SSH_PORT)${NC}"
+    sudo systemctl status ssh --no-pager
 fi
 
-# Автозапуск UFW (Проверка того, что мы добавили)
+# Проверка автозагрузки (UFW и SSH)
 UFW_BOOT=$(systemctl is-enabled ufw)
+SSH_BOOT=$(systemctl is-enabled ssh)
 echo -e "Автозапуск Firewall: ${GREEN}$UFW_BOOT${NC}"
+echo -e "Автозапуск SSH: ${GREEN}$SSH_BOOT${NC}"
 
 # Статус UFW
 echo -e "\n${YELLOW}Активные правила UFW:${NC}"
@@ -116,3 +122,4 @@ sudo ufw status verbose
 echo -e "${GREEN}-------------------------------------------------------${NC}"
 echo -e "ГОТОВО! SSH на порту: ${RED}$NEW_SSH_PORT${NC}"
 echo -e "Лог сохранен: $LOG${NC}"
+echo -e "Для входа: ssh -p $NEW_SSH_PORT root@$(curl -s https://ifconfig.me)${NC}"
