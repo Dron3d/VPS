@@ -194,7 +194,7 @@ bantime = 1h
 findtime = 10m
 EOF
 
-# UFW: Сброс и правила (строго под ваш стек)
+# UFW: Сброс и правила (строго под ваш стек + ACME)
 sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
 ufw --force reset >/dev/null 2>&1
 ufw default deny incoming
@@ -204,6 +204,7 @@ ufw allow in on lo
 ufw allow out on lo
 
 ufw allow $NEW_SSH_PORT/tcp comment 'SSH Custom Port'
+ufw allow 80/tcp comment 'HTTP/ACME & Redirect'
 ufw allow 443/tcp comment 'REALITY/VLESS/telemt'
 ufw allow 443/udp comment 'REALITY/VLESS UDP'
 ufw allow 8443/tcp comment 'Protomt/TLS-Alt'
