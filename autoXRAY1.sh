@@ -34,6 +34,25 @@ fi
 echo -e "${YEL}Продолжение выполнения скрипта...${NC}"
 fi
 
+# === ВОПРОС: TLS fingerprint ===
+echo -e "\n${YEL}Выберите TLS fingerprint для маскировки трафика:${NC}"
+echo "1) chrome    3) safari   5) android   7) 360"
+echo "2) firefox   4) ios      6) edge      8) qq"
+read -p "Введите номер [1-8] (по умолчанию 1 - chrome): " fp_choice
+case $fp_choice in
+1) fpBro="chrome" ;;
+2) fpBro="firefox" ;;
+3) fpBro="safari" ;;
+4) fpBro="ios" ;;
+5) fpBro="android" ;;
+6) fpBro="edge" ;;
+7) fpBro="360" ;;
+8) fpBro="qq" ;;
+*) fpBro="chrome" ;;
+esac
+echo -e "${GRN}Выбран fingerprint: $fpBro${NC}"
+# ============================
+
 # Включаем BBR
 bbr=$(sysctl -a | grep net.ipv4.tcp_congestion_control)
 if [ "$bbr" = "net.ipv4.tcp_congestion_control = bbr" ]; then
@@ -46,12 +65,12 @@ echo -e "${GRN}BBR активирован${NC}"
 fi
 
 cat <<EOF > /etc/security/limits.d/99-autoXRAY.conf
-*               soft    nofile          65535
-*               hard    nofile          65535
-root            soft    nofile          65535
-root            hard    nofile          65535
+*       soft    nofile  1048576
+*       hard    nofile  1048576
+root    soft    nofile  1048576
+root    hard    nofile  1048576
 EOF
-ulimit -n 65535
+ulimit -n 1048576
 echo -e "${GRN}Лимиты применены. Текущий ulimit -n: $(ulimit -n) ${NC}"
 
 # Создание директории сайта
@@ -152,14 +171,6 @@ xray_privateKey_vrv=$(echo "$key_output" | awk -F': ' '/PrivateKey/ {print $2}')
 xray_publicKey_vrv=$(echo "$key_output" | awk -F': ' '/Password/ {print $2}')
 xray_shortIds_vrv=$(openssl rand -hex 8)
 
-# Установка WARP-cli
-if ss -tuln | grep -q ":40000 "; then
-echo -e "${GRN}WARP-cli (Socks5 на порту 40000) уже работает. Пропускаем.${NC}"
-else
-echo -e "${GRN}Установка WARP-cli (автоматически)...${NC}"
-echo -e "1\n1\n40000" | bash <(curl -fsSL https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh) w
-fi
-
 export xray_uuid_vrv xray_privateKey_vrv xray_publicKey_vrv xray_shortIds_vrv DOMAIN path_subpage path_xhttp WEB_PATH
 
 # Создаем JSON конфигурацию сервера
@@ -209,12 +220,45 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
 "security": "none",
 "sockopt": { "acceptProxyProtocol": true }
 }
+},
+{
+"tag": "Hysteria2",
+"listen": "0.0.0.0",
+"port": 8080,
+"protocol": "hysteria",
+"settings": {
+"version": 2,
+"clients": [{ "auth": "${xray_shortIds_vrv}" }]
+},
+"streamSettings": {
+"network": "hysteria",
+"security": "tls",
+"tlsSettings": {
+"serverName": "$DOMAIN",
+"alpn": ["h3"],
+"certificates": [{
+"usage": "encipherment",
+"certificateFile": "/var/lib/xray/cert/fullchain.pem",
+"keyFile": "/var/lib/xray/cert/privkey.pem"
+}]
+},
+"hysteriaSettings": {
+"version": 2,
+"auth": "${xray_shortIds_vrv}"
+},
+"finalmask": {
+"quicParams": {
+"congestion": "brutal",
+"brutalUp": "100 mbps",
+"brutalDown": "100 mbps"
+}
+}
+}
 }
 ],
 "outbounds": [
 { "tag": "direct", "protocol": "freedom", "settings": { "domainStrategy": "ForceIPv4" } },
-{ "tag": "block", "protocol": "blackhole" },
-{ "tag": "warp", "protocol": "socks", "settings": { "servers": [{ "address": "127.0.0.1", "port": 40000 }] } }
+{ "tag": "block", "protocol": "blackhole" }
 ],
 "routing": {
 "domainStrategy": "IPIfNonMatch",
@@ -222,8 +266,7 @@ cat << 'EOF' | envsubst > "$SCRIPT_DIR/config.json"
 { "ip": ["geoip:private"], "outboundTag": "block" },
 { "port": "25", "outboundTag": "block" },
 { "protocol": ["bittorrent"], "outboundTag": "block" },
-{ "domain": ["geosite:category-ads", "geosite:win-spy", "geosite:private"], "outboundTag": "block" },
-{ "outboundTag": "warp", "domain": ["ifconfig.me","checkip.amazonaws.com","pify.org","2ip.io","habr.com","geosite:category-ip-geo-detect","geosite:google-gemini","geosite:canva","geosite:openai","geosite:whatsapp","geosite:category-ru"] }
+{ "domain": ["geosite:category-ads", "geosite:win-spy", "geosite:private"], "outboundTag": "block" }
 ]
 }
 }
@@ -233,13 +276,15 @@ systemctl restart xray
 echo -e "Перезапуск XRAY"
 
 # Формирование ссылок
-linkRTY1="vless://${xray_uuid_vrv}@$DOMAIN:443?security=reality&type=tcp&headerType=&path=&host=&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=${xray_publicKey_vrv}&sid=${xray_shortIds_vrv}&spx=%2F#vlessRAWrealityVISION-autoXRAY"
-linkRTY2="vless://${xray_uuid_vrv}@$DOMAIN:443?security=reality&type=xhttp&headerType=&path=%2F$path_xhttp&host=&mode=stream-one&extra=%7B%22xmux%22%3A%7B%22cMaxReuseTimes%22%3A%221000-3000%22%2C%22maxConcurrency%22%3A%223-5%22%2C%22maxConnections%22%3A0%2C%22hKeepAlivePeriod%22%3A0%2C%22hMaxRequestTimes%22%3A%22400-700%22%2C%22hMaxReusableSecs%22%3A%221200-1800%22%7D%2C%22headers%22%3A%7B%7D%2C%22noGRPCHeader%22%3Afalse%2C%22xPaddingBytes%22%3A%22400-800%22%2C%22scMaxEachPostBytes%22%3A1500000%2C%22scMinPostsIntervalMs%22%3A20%2C%22scStreamUpServerSecs%22%3A%2260-240%22%7D&sni=$DOMAIN&fp=chrome&pbk=${xray_publicKey_vrv}&sid=${xray_shortIds_vrv}&spx=%2F#vlessXHTTPrealityEXTRA-autoXRAY"
+linkRTY1="vless://${xray_uuid_vrv}@$DOMAIN:443?security=reality&type=tcp&headerType=&path=&host=&flow=xtls-rprx-vision&sni=$DOMAIN&fp=$fpBro&pbk=${xray_publicKey_vrv}&sid=${xray_shortIds_vrv}&spx=%2F#vlessRAWrealityVISION-autoXRAY"
+linkRTY2="vless://${xray_uuid_vrv}@$DOMAIN:443?security=reality&type=xhttp&headerType=&path=%2F$path_xhttp&host=&mode=stream-one&extra=%7B%22xmux%22%3A%7B%22cMaxReuseTimes%22%3A%221000-3000%22%2C%22maxConcurrency%22%3A%223-5%22%2C%22maxConnections%22%3A0%2C%22hKeepAlivePeriod%22%3A0%2C%22hMaxRequestTimes%22%3A%22400-700%22%2C%22hMaxReusableSecs%22%3A%221200-1800%22%7D%2C%22headers%22%3A%7B%7D%2C%22noGRPCHeader%22%3Afalse%2C%22xPaddingBytes%22%3A%22400-800%22%2C%22scMaxEachPostBytes%22%3A1500000%2C%22scMinPostsIntervalMs%22%3A20%2C%22scStreamUpServerSecs%22%3A%2260-240%22%7D&sni=$DOMAIN&fp=$fpBro&pbk=${xray_publicKey_vrv}&sid=${xray_shortIds_vrv}&spx=%2F#vlessXHTTPrealityEXTRA-autoXRAY"
+hy2="hy2://${xray_shortIds_vrv}@$DOMAIN:8080/?sni=$DOMAIN&alpn=h3"
 configListLink="https://$DOMAIN/$path_subpage.html"
 
 CONFIGS_ARRAY=(
 "VLESS XHTTP REALITY EXTRA (для моста)|$linkRTY2"
 "VLESS RAW REALITY VISION|$linkRTY1"
+"HYSTERIA2|$hy2"
 )
 
 # --- ЗАПИСЬ HEAD (СТАТИКА) ---
@@ -259,7 +304,7 @@ EOF
 
 # --- ЗАПИСЬ BODY (ДИНАМИЧЕСКИЕ ДАННЫЕ) ---
 cat >> "$WEB_PATH/$path_subpage.html" <<EOF
-<h2>➡️ Конфиги (Reality на порту 443)</h2>
+<h2>➡️ Конфиги</h2>
 EOF
 
 idx=1
@@ -285,8 +330,8 @@ EOF
 
 # --- ФИНАЛЬНАЯ ПРОВЕРКА ---
 echo -e "\n${YEL}=== Финальная проверка статусов ===${NC}"
-if ss -nlt | grep -q ":40000\b"; then echo -e "WARP-cli: ${GRN}LISTENING${NC}"; else echo -e "WARP-cli: ${RED}NOT LISTENING${NC}"; echo "Подробнее: https://github.com/xVRVx/autoXRAY/blob/main/test/warp-readme.md"; fi
+if ss -uln | grep -q ":8080\b"; then echo -e "Hysteria2: ${GRN}LISTENING${NC}"; else echo -e "Hysteria2: ${RED}NOT LISTENING${NC}"; echo "Возможно, UDP-трафик на порту 8080 блокируется вашим хостингом."; fi
 if systemctl is-active --quiet nginx; then echo -e "Nginx: ${GRN}RUNNING${NC}"; else echo -e "Nginx: ${RED}STOPPED/ERROR${NC}"; fi
 if systemctl is-active --quiet xray; then echo -e "XRAY: ${GRN}RUNNING${NC}"; else echo -e "XRAY: ${RED}STOPPED/ERROR${NC}"; fi
 
-echo -e "\n${YEL}VLESS XHTTP REALITY EXTRA (для моста) ${NC}\n$linkRTY2\n${YEL}VLESS RAW REALITY VISION ${NC}\n$linkRTY1\n${YEL}Ссылка на сохраненные конфиги ${NC}\n${GRN}$configListLink ${NC}\nСкопируйте конфиги в специализированное приложение:\n- iOS: Happ или v2RayTun или v2rayN\n- Android: Happ или v2RayTun или v2rayNG\n- Windows: конфиги Happ или winLoadXRAY или v2rayN\nдля vless v2RayTun или Throne\n${GRN}Поддержать автора: https://github.com/xVRVx/autoXRAY ${NC}\n"
+echo -e "\n${YEL}VLESS XHTTP REALITY EXTRA (для моста) ${NC}\n$linkRTY2\n${YEL}VLESS RAW REALITY VISION ${NC}\n$linkRTY1\n${YEL}HYSTERIA2 ${NC}\n$hy2\n${YEL}Ссылка на сохраненные конфиги ${NC}\n${GRN}$configListLink ${NC}\nСкопируйте конфиги в специализированное приложение:\n- iOS: Happ или v2RayTun или v2rayN\n- Android: Happ или v2RayTun или v2rayNG\n- Windows: конфиги Happ или winLoadXRAY или v2rayN\nдля vless v2RayTun или Throne\n${GRN}Поддержать автора: https://github.com/xVRVx/autoXRAY ${NC}\n"
