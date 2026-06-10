@@ -38,7 +38,7 @@ fi
 echo -e "\n${YEL}Выберите TLS fingerprint для маскировки трафика:${NC}"
 echo "1) chrome    3) safari   5) android   7) 360"
 echo "2) firefox   4) ios      6) edge      8) qq"
-read -p "Введите номер [1-8] (по умолчанию 1 - chrome): " fp_choice
+read -p "Введите номер [1-8] (по умолчанию 2 - firefox): " fp_choice
 case $fp_choice in
 1) fpBro="chrome" ;;
 2) fpBro="firefox" ;;
@@ -48,7 +48,7 @@ case $fp_choice in
 6) fpBro="edge" ;;
 7) fpBro="360" ;;
 8) fpBro="qq" ;;
-*) fpBro="chrome" ;;
+*) fpBro="firefox" ;;
 esac
 echo -e "${GRN}Выбран fingerprint: $fpBro${NC}"
 # ============================
